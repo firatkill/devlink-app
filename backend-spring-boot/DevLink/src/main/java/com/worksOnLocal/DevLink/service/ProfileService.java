@@ -11,6 +11,7 @@ import com.worksOnLocal.DevLink.entity.SocialLink;
 import com.worksOnLocal.DevLink.entity.User;
 import com.worksOnLocal.DevLink.repository.ProfileRepository;
 import jakarta.persistence.EntityNotFoundException;
+import jakarta.transaction.Transactional;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -134,6 +135,7 @@ public class ProfileService {
     }
 
     protected Optional<Profile> getProfileByUserId(Long userId) {
+
         return profileRepository.findByUser_Id(userId);
     }
 
