@@ -33,6 +33,7 @@ public class Profile {
 
     private String headerDescription;
 
+    private Long views=0L;
 
     @Column(columnDefinition = "bytea")
     private byte[] image;

@@ -205,5 +205,19 @@ class ProfileServiceTest {
 
     }
 
+    @Test
+    void incrementViews_success(){
+        Mockito.when(profileRepository.existsById(1L)).thenReturn(true);
+
+        profileService.incrementView(1L);
+
+        Mockito.verify(profileRepository).incrementViewsByProfileId(1L);
+    }
+
+    @Test
+    void incrementViews_throwsExceptionWhenProfileNotFound(){
+        Mockito.when(profileRepository.existsById(1L)).thenReturn(false);
+        assertThrows(EntityNotFoundException.class,()-> profileService.incrementView(1L));
+    }
 
 }

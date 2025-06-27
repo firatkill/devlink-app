@@ -139,5 +139,12 @@ public class ProfileService {
         return profileRepository.findByUser_Id(userId);
     }
 
+    @Transactional
+    public void incrementView(Long profileid) {
+        if(!profileRepository.existsById(profileid)) throw new EntityNotFoundException("Profil Bulunamadı");
 
+        profileRepository.incrementViewsByProfileId(profileid);
+
+
+    }
 }
