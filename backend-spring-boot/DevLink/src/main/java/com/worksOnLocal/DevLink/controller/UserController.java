@@ -5,6 +5,7 @@ import com.worksOnLocal.DevLink.dto.response.ApiResponse;
 import com.worksOnLocal.DevLink.dto.response.UpdateUserResponseDTO;
 import com.worksOnLocal.DevLink.entity.User;
 import com.worksOnLocal.DevLink.service.UserService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.hibernate.sql.Update;
 import org.springframework.http.ResponseEntity;
@@ -19,7 +20,7 @@ public class UserController {
 
 
     @PutMapping
-    public ResponseEntity<ApiResponse<UpdateUserResponseDTO>> updateUser(@RequestBody UpdateUserRequestDTO updateUserRequestDTO, @AuthenticationPrincipal User user) {
+    public ResponseEntity<ApiResponse<UpdateUserResponseDTO>> updateUser(@RequestBody @Valid UpdateUserRequestDTO updateUserRequestDTO, @AuthenticationPrincipal User user) {
     UpdateUserResponseDTO data=userService.updateUser(updateUserRequestDTO,user);
         ApiResponse<UpdateUserResponseDTO> response=ApiResponse.success("Kullanıcı bilgileri güncellendi",data);
 

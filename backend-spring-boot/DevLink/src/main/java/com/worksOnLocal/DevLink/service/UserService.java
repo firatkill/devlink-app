@@ -29,15 +29,15 @@ public class UserService {
         if(updateUserRequestDTO.username()!=null) userToUpdate.setUsername(updateUserRequestDTO.username());
         if(updateUserRequestDTO.email()!=null) userToUpdate.setEmail(updateUserRequestDTO.email());
         if(updateUserRequestDTO.password()!=null){
+
             String hashedPassword= passwordEncoder.encode(updateUserRequestDTO.password());
             userToUpdate.setPassword(hashedPassword);
+
         }
 
         User savedUser=userRepository.save(userToUpdate);
 
         String token= jwtService.generateToken(savedUser.getUsername());
         return new UpdateUserResponseDTO(savedUser.getUsername(), savedUser.getEmail(),token);
-
-
     }
 }
