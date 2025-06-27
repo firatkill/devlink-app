@@ -16,5 +16,7 @@ public interface ProfileRepository extends JpaRepository<Profile,Long> {
 
     Optional<Profile> findByUser_Username(String userUsername);
 
-
+    @Modifying
+    @Query("UPDATE Profile p SET p.views= p.views+1 WHERE p.id=:profileId")
+    void incrementViewsByProfileId(Long profileId);
 }

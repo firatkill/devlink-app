@@ -20,6 +20,13 @@ public class publicController {
         GetProfileResponseDTO data = profileService.getProfileByUsername(username);
 
         return ResponseEntity.ok(ApiResponse.success("Profil Başarıyla getirildi",data));
-
     }
+
+    @PatchMapping("/increment-views/{profileid}")
+    public ResponseEntity<ApiResponse<Void>> incrementView(@PathVariable Long profileid) {
+        profileService.incrementView(profileid);
+
+        return ResponseEntity.ok(ApiResponse.success("Profil Görüntüleme Sayısı Başarıyla Arttırıldı",null));
+    }
+
 }
