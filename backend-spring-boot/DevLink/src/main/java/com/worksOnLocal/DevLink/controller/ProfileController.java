@@ -88,4 +88,10 @@ public class ProfileController {
         return ResponseEntity.ok(ApiResponse.success("Proje Oluşturuldu",data));
     }
 
+    @GetMapping("/get-views")
+    public ResponseEntity<ApiResponse<Long>> getViews(@AuthenticationPrincipal User user){
+        Long viewsCount=projectService.getViewsCount(user);
+        return ResponseEntity.ok(ApiResponse.success("Görüntüleme Sayısı Başarıyla Getirildi.",viewsCount));
+    }
+
 }

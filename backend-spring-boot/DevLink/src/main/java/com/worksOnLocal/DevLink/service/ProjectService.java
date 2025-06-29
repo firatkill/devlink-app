@@ -7,6 +7,7 @@ import com.worksOnLocal.DevLink.dto.response.UpdateProjectResponseDTO;
 import com.worksOnLocal.DevLink.entity.Profile;
 import com.worksOnLocal.DevLink.entity.Project;
 import com.worksOnLocal.DevLink.entity.User;
+import com.worksOnLocal.DevLink.repository.ProfileRepository;
 import com.worksOnLocal.DevLink.repository.ProjectRepository;
 import jakarta.persistence.EntityNotFoundException;
 import jakarta.transaction.Transactional;
@@ -18,6 +19,7 @@ import org.springframework.stereotype.Service;
 public class ProjectService {
     private final ProjectRepository projectRepository;
     private final ProfileService profileService;
+    private final ProfileRepository profileRepository;
 
     public UpdateProjectResponseDTO updateProject(UpdateProjectRequestDTO updateProjectRequestDTO, User user) {
         Project project = projectRepository.findByIdAndProfile_User_Id(updateProjectRequestDTO.id(),user.getId()).orElseThrow(()->new EntityNotFoundException("Güncellenecek Proje bulunamadı."));
@@ -69,5 +71,10 @@ public class ProjectService {
 
 
 
+    }
+
+    public Long getViewsCount(User user) {
+         Profile profile=profileRepository.findByUser_Id(user.getId()).orElseThrow(()->new EntityNotFoundException("Profil Bulunamadı"));
+        return profile.getViews();
     }
 }
