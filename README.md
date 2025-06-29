@@ -678,15 +678,3 @@ API tutarlı bir hata yanıt formatı kullanır:
   "data": null
 }
 ```
-
-
-## 👏 Teşekkürler
-
-- Backend framework için Spring Boot ve Spring Security
-- Java kurumsal özellikleri için Jakarta EE
-- Veritabanı depolama için PostgreSQL
-- API dokümantasyonu için Swagger/OpenAPI
-
-
-© 2025 DevLink. Tüm hakları saklıdır.
-```
