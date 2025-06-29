@@ -573,6 +573,23 @@ PATCH /api/public/increment-views/{profileid}
 }
 ```
 
+#### Profil Görüntüleme Sayısını Getirme
+
+```
+PATCH /api/profile/get-views
+```
+
+**Yanıt (Response):**
+
+```json
+{
+  "success": true,
+  "message": "Görüntüleme Sayısı Başarıyla Getirildi.",
+  "error": null,
+  "data": 3
+}
+```
+
 ### 🧪 Test Endpointi
 
 ```
