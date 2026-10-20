@@ -1,680 +1,106 @@
-# 🚀 DevLink: Geliştiriciler İçin Profesyonel Portföy Platformu
+# YMM Invoice App
 
-[![Java](https://img.shields.io/badge/Java-21-orange.svg)](https://www.oracle.com/java/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-Latest-green.svg)](https://spring.io/projects/spring-boot)
-[![Jakarta EE](https://img.shields.io/badge/Jakarta%20EE-Latest-blue.svg)](https://jakarta.ee/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Latest-blue.svg)](https://www.postgresql.org/)
-[![JWT](https://img.shields.io/badge/JWT-Authentication-yellow.svg)](https://jwt.io/)
+A Next.js app for uploading Turkish e-invoices (e-Fatura, UBL XML) in bulk. You upload one ZIP archive of XML invoices for a taxpayer (mükellef), and background workers unpack it, parse each invoice and store the key fields in MongoDB. You can then search the invoices and open any one of them in its official layout.
 
-## 📋 Genel Bakış
+## What it does
 
-DevLink, yazılım geliştiricilerin ve teknik profesyonellerin kişisel profillerini, projelerini ve portföylerini sergileyebilecekleri özelleştirilmiş bir platformdur. Geliştiriciler DevLink üzerinde profesyonel dijital kimliklerini oluşturabilir, sosyal medya ve dış bağlantılarını entegre edebilir, öne çıkan projelerini gösterebilir ve hedef kitlelerine kendilerini etkili bir şekilde tanıtabilirler.
+- Takes a ZIP of UBL XML invoices plus taxpayer details (name, VKN, TCKN, full name), document type and year. Each upload is stored as a `Document` linked to that taxpayer and the signed-in user.
+- Parses each XML file for its UUID, invoice number, issue date, type code, currency, supplier and customer names and tax numbers, and the totals (tax-exclusive, tax, tax-inclusive, discount, payable).
+- Groups invoices by document type, year and taxpayer. Lists documents with search (taxpayer, description, year) and pagination.
+- Lists the invoices inside a document with search (invoice number, supplier, customer, tax numbers), a filter by invoice type code, sorting by issue date and pagination.
+- Shows a single invoice by applying the XSLT stylesheet embedded in the XML, in the browser, and lets you save that view as a PDF (`react-to-pdf`).
+- Shows a live progress bar while an upload is processed.
+- Email and password sign-up and login.
 
-Teknoloji alanında kendinizi göstermenin ve profesyonel ağınızı genişletmenin en etkili yolu artık DevLink!
+## Demo
 
-### ✨ Temel Özellikler
+![Demo](app/public/demo.gif)
 
-- **📝 Özelleştirilebilir Profiller**: Kişisel görünüm, başlık ve açıklamalarla benzersiz bir profil oluşturun
-- **🖼️ Proje Vitrini**: En iyi projelerinizi resimler, açıklamalar ve teknoloji bilgileriyle sergileyin
-- **🔗 Sosyal Medya Entegrasyonu**: GitHub, LinkedIn, Twitter gibi hesaplarınızı profilinize bağlayın
-- **🌐 Özel Bağlantı Yönetimi**: Portföy, blog veya diğer kişisel sitelerinize özel ikonlarla bağlantılar ekleyin
-- **👁️ Görünürlük Kontrolü**: Profilinizin veya belirli öğelerin görünürlüğünü tam olarak kontrol edin
-- **📊 Görüntülenme İstatistikleri**: Profilinizin kaç kez görüntülendiğini takip edin
-- **🔒 Güvenli Kimlik Doğrulama**: JWT tabanlı güvenli kimlik doğrulama sistemi
+## How it works
 
-## 💻 API Dokümantasyonu
+1. `POST /api/document/create-document` takes the multipart form with `formidable`, saves the ZIP to `uploads/faturalar/temp`, creates the `Mukellef` and `Document` records (`uploadCompleted: false`) and adds a job to the `document-processing` queue. If the job cannot be queued, the document is deleted again.
+2. `workers/documentWorker.js` opens the ZIP with `adm-zip` and skips folders, non-XML files and macOS `__MACOSX` / `._` entries. It sets two Redis counters, `doc:<id>:total` and `doc:<id>:processed`, writes each XML to disk and adds one `process-invoice` job per file to the `invoice-processing` queue.
+3. `workers/invoiceWorker.js` parses the XML with `xml2js` (`functions/util/extractFromXML.js` strips namespaces and reads the UBL fields), creates the `Invoice` row, renames the file to `<invoiceId>.xml` and increments the `processed` counter. When `processed` equals `total`, it sets `uploadCompleted: true` on the document and deletes the counters.
+4. The upload page polls `GET /api/document-progress/<id>` every 2 seconds. The route returns the percentage from the Redis counters. Once the counters are gone, it reads `uploadCompleted` from the database instead.
+5. `GET /api/invoice/view-invoice?filename=<id>.xml` returns the stored XML, which the viewer page renders with its embedded XSLT.
+6. `bull-board.js` is a small Express server that shows both queues in Bull Board at `/admin/queues`.
 
-DevLink, kullanıcı profilleri, projeler ve kimlik doğrulama için kapsamlı bir RESTful API sunar. Aşağıda her endpoint için ayrıntılı dokümantasyon bulunmaktadır.
+Retries: the invoice worker is configured with `attempts: 3` and exponential backoff (2 s). After the final attempt it writes a `failedInvoice` record (document id, file name, error message) and deletes the file. See the limitations below: as written, neither part takes effect yet.
 
-### 🌐 Temel URL
+Auth: NextAuth with a credentials provider and JWT sessions. The provider calls the app's own `/api/auth/login` route, which checks the password against a bcrypt hash. `middleware.js` sends signed-out users to `/login` and passes the user id to API routes in an `x-user-id` header.
 
-```
-http://localhost:8080
-```
+## Stack
 
-### 🔐 Kimlik Doğrulama (Authentication)
+- Next.js 15 (App Router for pages, `pages/api` for API routes), React 18, Tailwind CSS 4
+- BullMQ 5 and Redis (ioredis), Bull Board with Express
+- Prisma 6 with MongoDB (Atlas or local)
+- NextAuth 4 (credentials, JWT), bcryptjs, yup
+- adm-zip, formidable, xml2js, react-to-pdf
 
-#### Yeni Kullanıcı Kaydı
+## Data model
 
-```
-POST /api/auth/register
-```
+Defined in `app/prisma/schema.prisma`:
 
-**İstek (Request) Body:**
+- `User`: email, bcrypt password hash, has many documents.
+- `Mukellef`: taxpayer name, VKN, TCKN, full name.
+- `Document`: one upload. Type, year, description, `uploadCompleted`, linked to a user and a taxpayer.
+- `Invoice`: the parsed fields listed above, `uuid` is unique, deleted when its document is deleted.
 
-```json
-{
-  "username": "johndoe",
-  "email": "john.doe@example.com",
-  "password": "securepassword"
-}
-```
+## Run locally
 
-**Gereksinimler:**
-- Kullanıcı adı, e-posta ve şifre zorunludur
-- Kullanıcı adı 3-24 karakter arasında olmalıdır
-- Şifre en az 4 karakter olmalıdır
+You need Node.js 20.6 or later, a MongoDB database (Atlas, or a local replica set, which Prisma needs for MongoDB) and Redis.
 
-**Yanıt (Response):**
-
-```json
-{
-  "success": true,
-  "message": "User registered successfully",
-  "error": null,
-  "data": null
-}
-```
-
-#### Giriş Yapma
+Create `app/.env` with these variables (names taken from the code):
 
 ```
-POST /api/auth/login
+DATABASE_URL=          # MongoDB connection string
+REDIS_HOST=
+REDIS_PORT=
+NEXTAUTH_SECRET=
+NEXTAUTH_URL=http://localhost:3001
+NEXT_PUBLIC_API_URL=http://localhost:3001/api
 ```
 
-**İstek (Request) Body (Kullanıcı adı ile):**
-
-```json
-{
-  "username": "johndoe",
-  "password": "securepassword"
-}
-```
-
-**VEYA (E-posta ile):**
-
-```json
-{
-  "email": "john.doe@example.com",
-  "password": "securepassword"
-}
-```
-
-**Gereksinimler:**
-- Kullanıcı adı veya e-postadan en az biri sağlanmalıdır
-- Şifre zorunludur
-
-**Yanıt (Response):**
-
-```json
-{
-  "success": true,
-  "message": "Login successful",
-  "error": null,
-  "data": {
-    "username": "johndoe",
-    "email": "john.doe@example.com",
-    "token": "jwt_token_here"
-  }
-}
-```
-
-### 👤 Kullanıcı Yönetimi
-
-#### Kullanıcı Bilgilerini Güncelleme
-
-```
-PUT /api/user
-```
-
-**İstek (Request) Body:**
-
-```json
-{
-  "username": "johndoe_updated",
-  "email": "john.updated@example.com",
-  "password": "newsecurepassword"
-}
-```
-
-**Gereksinimler:**
-- Kullanıcı adı, e-posta ve şifre zorunludur
-- Kullanıcı adı 3-24 karakter arasında olmalıdır
-- Şifre en az 4 karakter olmalıdır
-
-**Yanıt (Response):**
-
-```json
-{
-  "success": true,
-  "message": "User updated successfully",
-  "error": null,
-  "data": {
-    "username": "johndoe_updated",
-    "email": "john.updated@example.com",
-    "token": "updated_jwt_token_here"
-  }
-}
-```
-
-#### Kullanıcı Hesabını Silme
-
-```
-DELETE /api/user
-```
-
-**Yanıt (Response):**
-
-```json
-{
-  "success": true,
-  "message": "User deleted successfully",
-  "error": null,
-  "data": null
-}
-```
-
-### 🖼️ Profil Yönetimi
-
-#### Profil Resmini Güncelleme
-
-```
-PUT /api/profile/update-image
-```
-
-**İstek (Request) Body:**
-
-```json
-{
-  "image": "base64_encoded_image_string"
-}
-```
-
-**Gereksinimler:**
-- Resim zorunludur (base64 kodlanmış string olarak)
-
-**Yanıt (Response):**
-
-```json
-{
-  "success": true,
-  "message": "Profile image updated successfully",
-  "error": null,
-  "data": {
-    "image": "base64_encoded_image_string"
-  }
-}
-```
-
-#### Profil Başlık Bilgilerini Güncelleme
-
-```
-PUT /api/profile/update-header
-```
-
-**İstek (Request) Body:**
-
-```json
-{
-  "displayName": "John Doe",
-  "headerTitle": "Senior Software Developer",
-  "headerDescription": "Full-stack developer with 8 years of experience in web technologies."
-}
-```
-
-**Yanıt (Response):**
-
-```json
-{
-  "success": true,
-  "message": "Profile header updated successfully",
-  "error": null,
-  "data": {
-    "displayName": "John Doe",
-    "headerTitle": "Senior Software Developer",
-    "headerDescription": "Full-stack developer with 8 years of experience in web technologies."
-  }
-}
-```
-
-#### Sosyal Medya Bağlantılarını Güncelleme
-
-```
-PUT /api/profile/social-links
-```
-
-**İstek (Request) Body:**
-
-```json
-[
-  {
-    "platform": "GITHUB",
-    "url": "https://github.com/johndoe",
-    "hidden": false
-  },
-  {
-    "platform": "LINKEDIN",
-    "url": "https://linkedin.com/in/johndoe",
-    "hidden": false
-  },
-  {
-    "platform": "TWITTER",
-    "url": "https://twitter.com/johndoe",
-    "hidden": true
-  }
-]
-```
-
-**Desteklenen Platformlar:**
-- GITHUB
-- LINKEDIN
-- FACEBOOK
-- TWITTER
-- INSTAGRAM
-
-**Yanıt (Response):**
-
-```json
-{
-  "success": true,
-  "message": "Social links updated successfully",
-  "error": null,
-  "data": [
-    {
-      "id": 1,
-      "platform": "GITHUB",
-      "url": "https://github.com/johndoe",
-      "hidden": false
-    },
-    {
-      "id": 2,
-      "platform": "LINKEDIN",
-      "url": "https://linkedin.com/in/johndoe",
-      "hidden": false
-    },
-    {
-      "id": 3,
-      "platform": "TWITTER",
-      "url": "https://twitter.com/johndoe",
-      "hidden": true
-    }
-  ]
-}
-```
-
-#### Dış Bağlantıları Güncelleme
-
-```
-PUT /api/profile/external-links
-```
-
-**İstek (Request) Body:**
-
-```json
-[
-  {
-    "icon": "base64_encoded_icon_string",
-    "title": "Kişisel Web Sitem",
-    "url": "https://johndoe.com",
-    "hidden": false
-  },
-  {
-    "icon": "base64_encoded_icon_string",
-    "title": "Teknik Blogum",
-    "url": "https://blog.johndoe.com",
-    "hidden": false
-  }
-]
-```
-
-**Yanıt (Response):**
-
-```json
-{
-  "success": true,
-  "message": "External links updated successfully",
-  "error": null,
-  "data": [
-    {
-      "id": 1,
-      "icon": "base64_encoded_icon_string",
-      "title": "Kişisel Web Sitem",
-      "url": "https://johndoe.com",
-      "hidden": false
-    },
-    {
-      "id": 2,
-      "icon": "base64_encoded_icon_string",
-      "title": "Teknik Blogum",
-      "url": "https://blog.johndoe.com",
-      "hidden": false
-    }
-  ]
-}
-```
-
-#### Profil Görünürlüğünü Yönetme
-
-**Profili Görünür Yapma:**
-
-```
-PUT /api/profile/show-profile
-```
-
-**Yanıt (Response):**
-
-```json
-{
-  "success": true,
-  "message": "Profile visibility set to visible",
-  "error": null,
-  "data": null
-}
-```
-
-**Profili Gizleme:**
-
-```
-PUT /api/profile/hide-profile
-```
-
-**Yanıt (Response):**
-
-```json
-{
-  "success": true,
-  "message": "Profile visibility set to hidden",
-  "error": null,
-  "data": null
-}
-```
-
-### 📂 Proje Yönetimi
-
-#### Yeni Proje Oluşturma
-
-```
-POST /api/profile/projects
-```
-
-**İstek (Request) Body:**
-
-```json
-{
-  "image": "base64_encoded_image_string",
-  "name": "E-ticaret Platformu",
-  "description": "Admin paneli ve ödeme entegrasyonu içeren tam kapsamlı bir e-ticaret çözümü.",
-  "deploymentUrl": "https://myproject.com",
-  "sourceCodeUrl": "https://github.com/johndoe/ecommerce",
-  "techsUsed": ["React", "Node.js", "MongoDB", "Express"],
-  "hidden": false
-}
-```
-
-**Yanıt (Response):**
-
-```json
-{
-  "success": true,
-  "message": "Project created successfully",
-  "error": null,
-  "data": {
-    "id": 1,
-    "image": "base64_encoded_image_string",
-    "name": "E-ticaret Platformu",
-    "description": "Admin paneli ve ödeme entegrasyonu içeren tam kapsamlı bir e-ticaret çözümü.",
-    "deploymentUrl": "https://myproject.com",
-    "sourceCodeUrl": "https://github.com/johndoe/ecommerce",
-    "techsUsed": ["React", "Node.js", "MongoDB", "Express"],
-    "hidden": false
-  }
-}
-```
-
-#### Mevcut Projeyi Güncelleme
-
-```
-PUT /api/profile/projects
-```
-
-**İstek (Request) Body:**
-
-```json
-{
-  "id": 1,
-  "image": "updated_base64_encoded_image_string",
-  "name": "E-ticaret Platformu v2",
-  "description": "Yeni özelliklerle güncellenen tanım ve gelişmiş kullanıcı deneyimi.",
-  "deploymentUrl": "https://myproject-v2.com",
-  "sourceCodeUrl": "https://github.com/johndoe/ecommerce-v2",
-  "techsUsed": ["React", "Node.js", "MongoDB", "Express", "Redis"],
-  "hidden": false
-}
-```
-
-**Gereksinimler:**
-- Proje ID'si zorunludur
-
-**Yanıt (Response):**
-
-```json
-{
-  "success": true,
-  "message": "Project updated successfully",
-  "error": null,
-  "data": {
-    "id": 1,
-    "image": "updated_base64_encoded_image_string",
-    "name": "E-ticaret Platformu v2",
-    "description": "Yeni özelliklerle güncellenen tanım ve gelişmiş kullanıcı deneyimi.",
-    "deploymentUrl": "https://myproject-v2.com",
-    "sourceCodeUrl": "https://github.com/johndoe/ecommerce-v2",
-    "techsUsed": ["React", "Node.js", "MongoDB", "Express", "Redis"],
-    "hidden": false
-  }
-}
-```
-
-#### Proje Silme
-
-```
-DELETE /api/profile/projects/{projectId}
-```
-
-**Path Parametreleri:**
-- projectId: Silinecek projenin ID'si
-
-**Yanıt (Response):**
-
-```json
-{
-  "success": true,
-  "message": "Project deleted successfully",
-  "error": null,
-  "data": null
-}
-```
-
-### 🌍 Halka Açık Endpointler
-
-#### Kullanıcı Profili Görüntüleme
-
-```
-GET /api/public/{username}
-```
-
-**Path Parametreleri:**
-- username: Profilini görüntülemek istediğiniz geliştiricinin kullanıcı adı
-
-**Yanıt (Response):**
-
-```json
-{
-  "success": true,
-  "message": "Profile retrieved successfully",
-  "error": null,
-  "data": {
-    "id": 1,
-    "user": {
-      "username": "johndoe"
-    },
-    "displayName": "John Doe",
-    "headerTitle": "Senior Software Developer",
-    "headerDescription": "Web teknolojilerinde 8 yıllık deneyime sahip full-stack geliştirici.",
-    "image": "base64_encoded_image_string",
-    "socialLinks": [
-      {
-        "id": 1,
-        "url": "https://github.com/johndoe",
-        "platform": "GITHUB",
-        "hidden": false
-      },
-      {
-        "id": 2,
-        "url": "https://linkedin.com/in/johndoe",
-        "platform": "LINKEDIN",
-        "hidden": false
-      }
-    ],
-    "externalLinks": [
-      {
-        "id": 1,
-        "icon": "base64_encoded_icon_string",
-        "title": "Kişisel Web Sitem",
-        "url": "https://johndoe.com",
-        "hidden": false
-      }
-    ],
-    "projects": [
-      {
-        "id": 1,
-        "image": "base64_encoded_image_string",
-        "name": "E-ticaret Platformu",
-        "description": "Admin paneli ve ödeme entegrasyonu içeren tam kapsamlı bir e-ticaret çözümü.",
-        "deploymentUrl": "https://myproject.com",
-        "sourceCodeUrl": "https://github.com/johndoe/ecommerce",
-        "techsUsed": ["React", "Node.js", "MongoDB", "Express"],
-        "hidden": false
-      }
-    ],
-    "updatedAt": "2025-06-28T10:15:30.123Z",
-    "hidden": false
-  }
-}
-```
-
-#### Profil Görüntüleme Sayısını Artırma
-
-```
-PATCH /api/public/increment-views/{profileid}
-```
-
-**Path Parametreleri:**
-- profileid: Görüntüleme sayısını artırmak istediğiniz profilin ID'si
-
-**Yanıt (Response):**
-
-```json
-{
-  "success": true,
-  "message": "View count incremented successfully",
-  "error": null,
-  "data": null
-}
-```
-
-#### Profil Görüntüleme Sayısını Getirme
-
-```
-PATCH /api/profile/get-views
-```
-
-**Yanıt (Response):**
-
-```json
-{
-  "success": true,
-  "message": "Görüntüleme Sayısı Başarıyla Getirildi.",
-  "error": null,
-  "data": 3
-}
-```
-
-### 🧪 Test Endpointi
-
-```
-GET /dummy
-```
-
-**Yanıt (Response):**
-
-Basit bir string döner, bağlantı testi için kullanılabilir.
-
-## 🔧 Projeyi Kurma
-
-### Ön Gereksinimler
-
-- Java 21
-- PostgreSQL
-- Maven veya Gradle (derleme için)
-
-### Konfigürasyon
-
-Uygulama `application.properties` dosyası kullanılarak yapılandırılır. Önemli konfigürasyonlar şunlardır:
-
-```properties
-spring.application.name=DevLink
-
-# Veritabanı Konfigürasyonu
-spring.datasource.url=jdbc:postgresql://localhost:5432/devlink
-spring.datasource.username=kullanıcıadı
-spring.datasource.password=şifre
-
-# JPA Konfigürasyonu
-spring.jpa.hibernate.ddl-auto=update
-
-# JWT Konfigürasyonu
-app.jwt.expiration=86400000
-app.jwt.secret_key=gizli_anahtarınız
-
-# Swagger Dokümantasyonu
-springdoc.api-docs.enabled=true
-springdoc.swagger-ui.enabled=true
-springdoc.swagger-ui.path=/swagger-ui.html
-springdoc.api-docs.path=/api-docs
-springdoc.enable-spring-security=true
-```
-
-### Uygulamayı Çalıştırma
-
-1. Repository'yi klonlayın
-2. Veritabanı ayarlarınızı `application.properties` dosyasında yapılandırın
-3. Projeyi derleyin
-4. Uygulamayı çalıştırın
+Then, from the `app` folder:
 
 ```bash
-./mvnw spring-boot:run
+npm install
+npx prisma generate
+npx prisma db push
+npm run dev                                         # Next.js on http://localhost:3001
+node --env-file=.env workers/documentWorker.js      # separate terminal
+node --env-file=.env workers/invoiceWorker.js       # separate terminal
+node --env-file=.env bull-board.js                  # http://localhost:3000/admin/queues
 ```
 
-API http://localhost:8080 adresinde ve Swagger UI dokümantasyonu http://localhost:8080/swagger-ui.html adresinde erişilebilir olacaktır.
+The workers and Bull Board are plain Node scripts and do not load `.env` on their own, hence `--env-file`. Bull Board listens on port 3000, although its log line prints 3001.
 
-## 🔒 Güvenlik
-
-Uygulama, kimlik doğrulama için JWT (JSON Web Token) kullanır. Kullanıcı giriş yaptığında, sonraki istekler için Authorization başlığına dahil edilmesi gereken bir token alır:
+## Project structure
 
 ```
-Authorization: Bearer <token>
+app/
+  app/                 pages: login, register, upload-document, list-documents, view-invoice
+  components/          upload progress bar
+  pages/api/           auth, document, invoice and document-progress routes
+  lib/                 Prisma client, Redis connection, BullMQ queues
+  workers/             documentWorker.js (unzip), invoiceWorker.js (parse and save)
+  functions/util/      XML parsing, XSLT rendering, password hashing
+  prisma/schema.prisma
+  bull-board.js
+  uploads/             stored XML files (git-ignored)
 ```
 
-Tokenin varsayılan olarak 24 saatlik (86400000 milisaniye) bir geçerlilik süresi vardır.
+## Limitations and next steps
 
-## 🌟 API Kullanım Tavsiyeleri
+- Retries do not run yet. `attempts` and `backoff` are passed to the `Worker`, but BullMQ reads them from job options, so they should move to `invoiceQueue.add(...)` or the queue's `defaultJobOptions`.
+- The schema has no `FailedInvoice` model, so `prisma.failedInvoice.create` would fail. The model needs to be added, and the progress counter should count failed files so a document with a bad file can still finish.
+- The document worker calls `job.waitUntilFinished()` without a `QueueEvents` instance before deleting the ZIP, so the temporary ZIP may not be removed.
+- Only invoices (`FATURA`) are supported. Dispatch notes (irsaliye) appear in the form but are disabled, and the document type is always saved as `FATURA`.
+- Files are stored on the local disk, so the API and workers must share one machine. Object storage would remove that.
+- `view-invoice` and `get-invoices` do not check that the invoice or document belongs to the signed-in user.
+- Each upload creates a new `Mukellef` record. The same taxpayer is not reused across uploads.
+- The home page is still the default Next.js starter page. There are no tests.
 
-1. **Kimlik Doğrulama**: Her zaman tokeni'nizi güvende tutun ve korumalı endpointlere yapılan isteklere dahil edin
-2. **Base64 Kodlama**: Resimler ve simgeler için, düzgün şekilde Base64 ile kodlandıklarından emin olun
-3. **Proje Vitrini**: En iyi sunum için, projelerinizde yüksek kaliteli görseller ve detaylı açıklamalar kullanın
-4. **Profil Görünürlüğü**: Profilinizin başkalarına ne zaman görünür olacağını kontrol etmek için profili göster/gizle endpointlerini kullanın
-5. **Optimize Edilmiş Görseller**: Performans için resimleri optimize edin ve uygun boyutlarda kullanın
+## License
 
-## ⚠️ Hata İşleme
-
-API tutarlı bir hata yanıt formatı kullanır:
-
-```json
-{
-  "success": false,
-  "message": "Hata açıklaması",
-  "error": "Hata türü veya kodu",
-  "data": null
-}
-```
+MIT
